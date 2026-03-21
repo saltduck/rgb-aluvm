@@ -116,6 +116,11 @@ pub const INSTR_RESV_TO: u8 = 0b01_111_111;
 
 // ### Hashing (BPDIGEST)
 
+/// OUTR: append register value to host output (same opcode byte as RIPEMD; resolved via
+/// [`Bytecode::try_decode_extension_prefix`](crate::isa::Bytecode::try_decode_extension_prefix)
+/// when using [`RgbExt`](crate::isa::RgbExt)).
+pub const INSTR_OUTR: u8 = 0b10_000_000;
+
 pub const INSTR_RIPEMD: u8 = 0b10_000_000;
 pub const INSTR_SHA256: u8 = 0b10_000_001;
 pub const INSTR_SHA512: u8 = 0b10_000_010;

@@ -96,6 +96,18 @@ pub trait Bytecode {
     where
         Self: Sized,
         R: Read;
+
+    /// Decodes an extension-specific prefix that would otherwise be classified as a core opcode.
+    ///
+    /// Default: no prefix. Implementations such as [`RgbExt`](crate::isa::RgbExt) may consume
+    /// bytes here before the standard [`Instr::decode`](Instr) dispatch (e.g. OUTR at `0x80`
+    /// vs RIPEMD).
+    #[inline]
+    fn try_decode_extension_prefix<R>(reader: &mut R) -> Result<Option<Self>, CodeEofError>
+    where Self: Sized, R: Read {
+        let _ = reader;
+        Ok(None)
+    }
 }
 
 impl<Extension> Bytecode for Instr<Extension>
@@ -167,6 +179,9 @@ where Extension: InstructionSet
 
     fn decode<R>(reader: &mut R) -> Result<Self, CodeEofError>
     where R: Read {
+        if let Some(ext) = Extension::try_decode_extension_prefix(reader)? {
+            return Ok(Instr::ExtensionCodes(ext));
+        }
         let instr = reader.peek_u8()?;
         Ok(match instr {
             instr if ControlFlowOp::instr_range().contains(&instr) => {

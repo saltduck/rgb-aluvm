@@ -134,6 +134,15 @@
 //! - Call stack register (cs0), 3*2^16 bits (192kB block)
 //! - Call stack pointer register (cp0), 16 bits
 //!
+//! ### OUTR (OUTSTACK extension)
+//!
+//! - Use [`Instr<RgbExt>`](isa::Instr) with [`RgbExt`](isa::RgbExt) and an [`OutrContext`](isa::OutrContext)
+//!   when executing programs that append register values to a host-visible output list (same `0x80`
+//!   + register-byte encoding as the outstack project).
+//! - With [`Instr<ReservedOp>`](isa::Instr) (the default), byte `0x80` remains RIPEMD-160; OUTR is
+//!   enabled only when the extension type decodes that prefix first (see
+//!   [`Bytecode::try_decode_extension_prefix`](isa::Bytecode::try_decode_extension_prefix)).
+//!
 //! [AluVM]: https://github.com/internet2-org/aluvm-spec
 
 #![allow(clippy::bool_assert_comparison)]

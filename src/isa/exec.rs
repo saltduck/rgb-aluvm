@@ -26,21 +26,24 @@
 #[cfg(all(feature = "alloc", not(feature = "std")))]
 use alloc::boxed::Box;
 use alloc::collections::BTreeSet;
+use alloc::vec::Vec;
 #[cfg(all(feature = "alloc", not(feature = "std")))]
 use alloc::string::{String, ToString};
 use core::cmp::Ordering;
 use core::ops::{BitAnd, BitOr, BitXor, Neg, Rem, Shl, Shr};
 
+use amplify::num::u5;
 use sha2::Digest;
 
 use super::{
     ArithmeticOp, BitwiseOp, Bytecode, BytesOp, CmpOp, ControlFlowOp, Curve25519Op, DigestOp,
     Instr, MoveOp, PutOp, ReservedOp, Secp256k1Op,
 };
+use super::outr::{OutrContext, OutrValue, RgbExt};
 use crate::data::{ByteStr, MaybeNumber, Number, NumberLayout};
 use crate::isa::{ExtendFlag, FloatEqFlag, IntFlags, MergeFlag, NoneEqFlag, SignFlag};
 use crate::library::{constants, IsaName, IsaSeg, LibSite};
-use crate::reg::{CoreRegs, NumericRegister, Reg, Reg32, RegA, RegA2, RegAR, RegBlockAR, RegR};
+use crate::reg::{CoreRegs, NumericRegister, Reg, Reg32, RegA, RegA2, RegAR, RegBlockAR, RegR, RegS};
 
 /// Turing machine movement after instruction execution
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -1676,6 +1679,56 @@ impl InstructionSet for ReservedOp {
     }
 }
 
+impl InstructionSet for RgbExt {
+    type Context<'ctx> = OutrContext<'ctx>;
+
+    #[inline]
+    fn isa_ids() -> IsaSeg { IsaSeg::with(constants::ISA_ID_OUTSTACK) }
+
+    fn src_regs(&self) -> BTreeSet<Reg> {
+        match self {
+            RgbExt::Outr(r) if *r < 32 => bset![Reg::A(RegA::A64, Reg32::from(u5::with(*r)))],
+            RgbExt::Outr(r) if *r < 48 => bset![Reg::S(RegS::from(*r - 32))],
+            RgbExt::Outr(_) => BTreeSet::new(),
+        }
+    }
+
+    fn dst_regs(&self) -> BTreeSet<Reg> { BTreeSet::new() }
+
+    #[inline]
+    fn complexity(&self) -> u64 { 2 }
+
+    fn exec(&self, regs: &mut CoreRegs, _site: LibSite, ctx: &Self::Context<'_>) -> ExecStep {
+        let RgbExt::Outr(reg) = self;
+        if ctx.output.borrow().len() >= ctx.max_items {
+            return ExecStep::Fail;
+        }
+        if *reg < 32 {
+            let r = Reg32::from(u5::with(*reg));
+            let n = regs.get_n(RegA::A64, r);
+            let opt_no: Option<Number> = n.into();
+            let v = opt_no
+                .map(|no| {
+                    let u: u64 = no.into();
+                    OutrValue::Int(u as i64)
+                })
+                .unwrap_or(OutrValue::Int(0));
+            ctx.output.borrow_mut().push(v);
+            ExecStep::Next
+        } else if *reg < 48 {
+            let s_idx = *reg - 32;
+            let s_val = regs
+                .s16(RegS::from(s_idx))
+                .map(|s| OutrValue::Bytes(s.as_ref().to_vec()))
+                .unwrap_or_else(|| OutrValue::Bytes(Vec::new()));
+            ctx.output.borrow_mut().push(s_val);
+            ExecStep::Next
+        } else {
+            ExecStep::Fail
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1938,6 +1991,104 @@ mod tests {
             &(),
         );
         assert!(register.st0);
+    }
+
+    #[test]
+    fn outr_decode_rgb_ext_vs_ripemd_reserved() {
+        use crate::isa::opcodes::INSTR_OUTR;
+        use crate::library::{Cursor, LibSeg};
+
+        let lib_seg = LibSeg::default();
+        let bytes = [INSTR_OUTR, 0u8];
+        let mut c = Cursor::with(&bytes[..], &[][..], &lib_seg);
+        let i: Instr<RgbExt> = Instr::decode(&mut c).unwrap();
+        assert!(matches!(i, Instr::ExtensionCodes(RgbExt::Outr(0))));
+
+        let mut c2 = Cursor::with(&bytes[..], &[][..], &lib_seg);
+        let i2: Instr<ReservedOp> = Instr::decode(&mut c2).unwrap();
+        assert!(matches!(i2, Instr::Digest(DigestOp::Ripemd(_, _))));
+    }
+
+    #[test]
+    fn outr_encode_decode_roundtrip() {
+        use crate::data::ByteStr;
+        use crate::library::{Cursor, LibSeg};
+
+        let lib_seg = LibSeg::default();
+        let mut code = [0u8; 8];
+        let mut w = Cursor::<_, ByteStr>::new(&mut code[..], &lib_seg);
+        Instr::<RgbExt>::ExtensionCodes(RgbExt::Outr(7))
+            .encode(&mut w)
+            .unwrap();
+        let len = w.offset().0 as usize;
+        let mut r = Cursor::with(&code[..len], &[][..], &lib_seg);
+        let i = Instr::<RgbExt>::decode(&mut r).unwrap();
+        assert_eq!(i, Instr::ExtensionCodes(RgbExt::Outr(7)));
+    }
+
+    #[test]
+    fn outr_exec_a64_s16_fail_and_cap() {
+        use core::cell::RefCell;
+
+        let lib_site = LibSite::default();
+        let mut register = CoreRegs::default();
+        PutOp::PutA(
+            RegA::A64,
+            Reg32::Reg0,
+            MaybeNumber::from(42u64).into(),
+        )
+        .exec(&mut register, lib_site, &());
+        let out = RefCell::new(Vec::new());
+        let ctx = OutrContext {
+            output: &out,
+            max_items: 8,
+        };
+        assert_eq!(
+            RgbExt::Outr(0).exec(&mut register, lib_site, &ctx),
+            ExecStep::Next
+        );
+        assert_eq!(out.borrow().len(), 1);
+        assert_eq!(out.borrow()[0], OutrValue::Int(42));
+
+        assert_eq!(
+            RgbExt::Outr(48).exec(&mut register, lib_site, &ctx),
+            ExecStep::Fail
+        );
+
+        let out2 = RefCell::new(Vec::new());
+        let ctx2 = OutrContext {
+            output: &out2,
+            max_items: 0,
+        };
+        assert_eq!(
+            RgbExt::Outr(0).exec(&mut register, lib_site, &ctx2),
+            ExecStep::Fail
+        );
+    }
+
+    #[test]
+    fn outr_exec_s16_bytes() {
+        use core::cell::RefCell;
+
+        let lib_site = LibSite::default();
+        let mut register = CoreRegs::default();
+        let s = b"hello";
+        BytesOp::Put(0.into(), Box::new(ByteStr::with(s)), false).exec(
+            &mut register,
+            lib_site,
+            &(),
+        );
+        let out = RefCell::new(Vec::new());
+        let ctx = OutrContext {
+            output: &out,
+            max_items: 8,
+        };
+        assert_eq!(
+            RgbExt::Outr(32).exec(&mut register, lib_site, &ctx),
+            ExecStep::Next
+        );
+        assert_eq!(out.borrow().len(), 1);
+        assert_eq!(out.borrow()[0], OutrValue::Bytes(s.to_vec()));
     }
 
     /* TODO: Enable after curve25519 re-implementation

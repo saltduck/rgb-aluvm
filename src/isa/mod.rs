@@ -32,6 +32,7 @@ mod exec;
 mod flags;
 mod instr;
 pub mod opcodes;
+mod outr;
 
 pub use bytecode::{Bytecode, BytecodeError};
 pub use exec::{ExecStep, InstructionSet};
@@ -43,6 +44,8 @@ pub use instr::{
     ArithmeticOp, BitwiseOp, BytesOp, CmpOp, ControlFlowOp, Curve25519Op, DigestOp, Instr, MoveOp,
     PutOp, ReservedOp, Secp256k1Op,
 };
+pub use opcodes::INSTR_OUTR;
+pub use outr::{OutrContext, OutrValue, RgbExt};
 
 /// List of standardised ISA extensions.
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug, Display)]
@@ -82,6 +85,10 @@ pub enum Isa {
     #[display("RGB")]
     Rgb,
 
+    /// Append-only register output (OUTR / outstack)
+    #[display("OUTSTACK")]
+    Outstack,
+
     /// Lightning network protocol-specific instructions
     #[display("LNP")]
     Lnp,
@@ -97,7 +104,7 @@ pub enum Isa {
 
 impl Isa {
     /// Enumerates all ISA extension variants
-    pub const fn all() -> [Isa; 11] {
+    pub const fn all() -> [Isa; 12] {
         [
             Isa::Alu,
             Isa::Float,
@@ -107,6 +114,7 @@ impl Isa {
             Isa::AluRe,
             Isa::Bp,
             Isa::Rgb,
+            Isa::Outstack,
             Isa::Lnp,
             Isa::Simd,
             Isa::Rebica,
