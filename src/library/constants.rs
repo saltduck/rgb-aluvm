@@ -58,7 +58,7 @@ pub const ISA_ID_WEB4: &str = "WEB4";
 pub const ISA_ID_BITCOIN: &str = "BITCOIN";
 pub const ISA_ID_BP: &str = "BP";
 pub const ISA_ID_RGB: &str = "RGB";
-/// Append-only output register extension (OUTR), aligned with the outstack encoding.
+/// Append-only output register extension (OUTR) and related Outstack opcodes (`0x90`..=`0x9F`).
 pub const ISA_ID_OUTSTACK: &str = "OUTSTACK";
 pub const ISA_ID_LNP: &str = "LNP";
 

@@ -20,7 +20,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! OUTR extension: append-only output of A64 / S16 register values (outstack-compatible encoding).
+//! OUTR extension: append-only output of A64 / S16 register values (Outstack ISA, opcode `0x90`).
 
 use alloc::vec::Vec;
 
@@ -28,7 +28,7 @@ use core::cell::RefCell;
 use core::ops::RangeInclusive;
 
 use super::bytecode::{Bytecode, BytecodeError};
-use super::opcodes::INSTR_OUTR;
+use super::opcodes::{INSTR_OUTR, INSTR_OUTSTACK_FROM, INSTR_OUTSTACK_TO};
 use crate::library::{CodeEofError, Read, Write};
 
 /// One value produced by [`RgbExt::Outr`](RgbExt::Outr).
@@ -51,7 +51,7 @@ pub struct OutrContext<'a> {
     pub max_items: usize,
 }
 
-/// RGB / outstack extension instructions decoded as [`Instr::ExtensionCodes`](super::Instr).
+/// Outstack extension instructions decoded as [`Instr::ExtensionCodes`](super::Instr).
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Display)]
 #[display(inner)]
 pub enum RgbExt {
@@ -68,7 +68,7 @@ impl RgbExt {
 
 impl Bytecode for RgbExt {
     #[inline]
-    fn instr_range() -> RangeInclusive<u8> { INSTR_OUTR..=INSTR_OUTR }
+    fn instr_range() -> RangeInclusive<u8> { INSTR_OUTSTACK_FROM..=INSTR_OUTSTACK_TO }
 
     fn instr_byte(&self) -> u8 { INSTR_OUTR }
 
@@ -81,18 +81,11 @@ impl Bytecode for RgbExt {
 
     fn decode<R>(reader: &mut R) -> Result<Self, CodeEofError>
     where R: Read {
-        match reader.read_u8()? {
+        let opcode = reader.read_u8()?;
+        match opcode {
             INSTR_OUTR => Self::decode_outr_after_opcode(reader),
+            x if (INSTR_OUTSTACK_FROM..=INSTR_OUTSTACK_TO).contains(&x) => Err(CodeEofError),
             x => unreachable!("instruction {:#010b} classified as RgbExt extension", x),
         }
-    }
-
-    fn try_decode_extension_prefix<R>(reader: &mut R) -> Result<Option<Self>, CodeEofError>
-    where Self: Sized, R: Read {
-        if reader.peek_u8()? != INSTR_OUTR {
-            return Ok(None);
-        }
-        reader.read_u8()?;
-        Ok(Some(Self::decode_outr_after_opcode(reader)?))
     }
 }

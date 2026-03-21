@@ -136,12 +136,13 @@
 //!
 //! ### OUTR (OUTSTACK extension)
 //!
+//! - Opcodes `0x90`..=`0x9F` are reserved for the Outstack ISA extension; [`INSTR_OUTR`](crate::isa::INSTR_OUTR)
+//!   is `0x90` followed by a register index byte.
 //! - Use [`Instr<RgbExt>`](isa::Instr) with [`RgbExt`](isa::RgbExt) and an [`OutrContext`](isa::OutrContext)
-//!   when executing programs that append register values to a host-visible output list (same `0x80`
-//!   + register-byte encoding as the outstack project).
-//! - With [`Instr<ReservedOp>`](isa::Instr) (the default), byte `0x80` remains RIPEMD-160; OUTR is
-//!   enabled only when the extension type decodes that prefix first (see
-//!   [`Bytecode::try_decode_extension_prefix`](isa::Bytecode::try_decode_extension_prefix)).
+//!   when executing programs that append register values to a host-visible output list.
+//! - With [`Instr<ReservedOp>`](isa::Instr) (the default), extension opcodes in `0x80`..=`0xFE`
+//!   decode as [`ReservedOp`](isa::ReservedOp); use [`Instr<RgbExt>`](isa::Instr) when the program
+//!   commits to the Outstack extension.
 //!
 //! [AluVM]: https://github.com/internet2-org/aluvm-spec
 

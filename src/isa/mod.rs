@@ -44,7 +44,7 @@ pub use instr::{
     ArithmeticOp, BitwiseOp, BytesOp, CmpOp, ControlFlowOp, Curve25519Op, DigestOp, Instr, MoveOp,
     PutOp, ReservedOp, Secp256k1Op,
 };
-pub use opcodes::INSTR_OUTR;
+pub use opcodes::{INSTR_OUTR, INSTR_OUTSTACK_FROM, INSTR_OUTSTACK_TO};
 pub use outr::{OutrContext, OutrValue, RgbExt};
 
 /// List of standardised ISA extensions.
@@ -85,7 +85,7 @@ pub enum Isa {
     #[display("RGB")]
     Rgb,
 
-    /// Append-only register output (OUTR / outstack)
+    /// Outstack extension: reserved opcode range `0x90`..=`0x9F` (OUTR is [`INSTR_OUTR`]).
     #[display("OUTSTACK")]
     Outstack,
 

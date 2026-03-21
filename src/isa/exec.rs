@@ -1994,19 +1994,40 @@ mod tests {
     }
 
     #[test]
-    fn outr_decode_rgb_ext_vs_ripemd_reserved() {
-        use crate::isa::opcodes::INSTR_OUTR;
+    fn outr_rgb_ext_uses_outstack_opcode_not_ripemd() {
+        use crate::isa::opcodes::{INSTR_OUTR, INSTR_RIPEMD};
         use crate::library::{Cursor, LibSeg};
+        use crate::reg::Reg16;
 
         let lib_seg = LibSeg::default();
-        let bytes = [INSTR_OUTR, 0u8];
-        let mut c = Cursor::with(&bytes[..], &[][..], &lib_seg);
+        let outr_bytes = [INSTR_OUTR, 0u8];
+        let mut c = Cursor::with(&outr_bytes[..], &[][..], &lib_seg);
         let i: Instr<RgbExt> = Instr::decode(&mut c).unwrap();
         assert!(matches!(i, Instr::ExtensionCodes(RgbExt::Outr(0))));
 
-        let mut c2 = Cursor::with(&bytes[..], &[][..], &lib_seg);
+        // RIPEMD remains at `0x80` for the default ISA (no Outstack extension).
+        let ripemd_bytes = [INSTR_RIPEMD, 0u8];
+        let mut c2 = Cursor::with(&ripemd_bytes[..], &[][..], &lib_seg);
         let i2: Instr<ReservedOp> = Instr::decode(&mut c2).unwrap();
-        assert!(matches!(i2, Instr::Digest(DigestOp::Ripemd(_, _))));
+        match i2 {
+            Instr::Digest(DigestOp::Ripemd(s, d)) => {
+                assert_eq!(s, RegS::from(0u8));
+                assert_eq!(d, Reg16::Reg0);
+            }
+            other => panic!("expected RIPEMD digest, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn outstack_reserved_opcode_decode_errors_until_defined() {
+        use crate::isa::opcodes::INSTR_OUTSTACK_FROM;
+        use crate::library::{CodeEofError, Cursor, LibSeg};
+
+        let lib_seg = LibSeg::default();
+        let reserved = [INSTR_OUTSTACK_FROM + 1];
+        let mut c = Cursor::with(&reserved[..], &[][..], &lib_seg);
+        let err = Instr::<RgbExt>::decode(&mut c).unwrap_err();
+        assert_eq!(err, CodeEofError);
     }
 
     #[test]

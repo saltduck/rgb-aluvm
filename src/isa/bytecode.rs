@@ -99,9 +99,8 @@ pub trait Bytecode {
 
     /// Decodes an extension-specific prefix that would otherwise be classified as a core opcode.
     ///
-    /// Default: no prefix. Implementations such as [`RgbExt`](crate::isa::RgbExt) may consume
-    /// bytes here before the standard [`Instr::decode`](Instr) dispatch (e.g. OUTR at `0x80`
-    /// vs RIPEMD).
+    /// Default: no prefix. Extensions may consume bytes here before the standard
+    /// [`Instr::decode`](Instr) dispatch when an opcode would otherwise overlap core ISA decoding.
     #[inline]
     fn try_decode_extension_prefix<R>(reader: &mut R) -> Result<Option<Self>, CodeEofError>
     where Self: Sized, R: Read {

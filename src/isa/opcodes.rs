@@ -114,12 +114,21 @@ pub const INSTR_RESV_TO: u8 = 0b01_111_111;
 
 // ## ISA extensions:
 
-// ### Hashing (BPDIGEST)
+// ### Outstack (OUTSTACK): register output and related host-visible I/O
 
-/// OUTR: append register value to host output (same opcode byte as RIPEMD; resolved via
-/// [`Bytecode::try_decode_extension_prefix`](crate::isa::Bytecode::try_decode_extension_prefix)
-/// when using [`RgbExt`](crate::isa::RgbExt)).
-pub const INSTR_OUTR: u8 = 0b10_000_000;
+/// First opcode byte reserved for the OUTSTACK ISA extension (`0x90`..=`0x9F`).
+pub const INSTR_OUTSTACK_FROM: u8 = 0x90;
+
+/// Last opcode byte reserved for the OUTSTACK ISA extension.
+pub const INSTR_OUTSTACK_TO: u8 = 0x9F;
+
+/// OUTR: append register value to host output (`opcode` + register index byte).
+///
+/// Further opcodes in [`INSTR_OUTSTACK_FROM`]..=[`INSTR_OUTSTACK_TO`] are reserved for future
+/// Outstack instructions.
+pub const INSTR_OUTR: u8 = INSTR_OUTSTACK_FROM;
+
+// ### Hashing (BPDIGEST)
 
 pub const INSTR_RIPEMD: u8 = 0b10_000_000;
 pub const INSTR_SHA256: u8 = 0b10_000_001;
