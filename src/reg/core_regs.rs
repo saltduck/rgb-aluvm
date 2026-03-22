@@ -38,7 +38,7 @@ use half::bf16;
 
 use super::{Reg, Reg32, RegA, RegAFR, RegF, RegR, RegS};
 use crate::data::{ByteStr, MaybeNumber, Number, RegValue};
-use crate::isa::InstructionSet;
+use crate::isa::{InstructionSet, OutrValue};
 use crate::library::LibSite;
 
 /// Maximal size of call stack.
@@ -82,6 +82,13 @@ pub struct CoreRegs {
 
     /// String and bytestring registers
     pub(crate) s16: Box<[Option<ByteStr>; 16]>,
+
+    /// Append-only output stack populated by [`OutstackOp::Outr`](crate::isa::OutstackOp::Outr).
+    outstack: Vec<OutrValue>,
+
+    /// Maximum number of items allowed in [`outstack`](CoreRegs::outstack).
+    /// Exceeding this limit causes the program to fail.
+    outstack_limit: usize,
 
     /// Control flow register which stores result of equality, comparison, boolean check and
     /// overflowing operations. Initialized with `true`.
@@ -153,6 +160,9 @@ impl Default for CoreRegs {
 
             s16: Default::default(),
 
+            outstack: Vec::new(),
+            outstack_limit: 0xFFFF,
+
             st0: true,
             cy0: 0,
             ca0: 0,
@@ -170,6 +180,29 @@ impl CoreRegs {
     /// Performs exactly the same as [`CoreRegs::default()`].
     #[inline]
     pub fn new() -> CoreRegs { CoreRegs::default() }
+
+    /// Sets the maximum number of items that can be pushed onto the outstack.
+    #[inline]
+    pub fn set_outstack_limit(&mut self, limit: usize) { self.outstack_limit = limit; }
+
+    /// Returns a shared reference to the outstack contents.
+    #[inline]
+    pub fn outstack(&self) -> &[OutrValue] { &self.outstack }
+
+    /// Drains and returns the outstack contents, leaving the outstack empty.
+    #[inline]
+    pub fn drain_outstack(&mut self) -> Vec<OutrValue> { core::mem::take(&mut self.outstack) }
+
+    /// Pushes a value onto the outstack. Returns `false` if the outstack limit is exceeded and
+    /// sets `st0` to `false`.
+    pub(crate) fn push_outstack(&mut self, val: OutrValue) -> bool {
+        if self.outstack.len() >= self.outstack_limit {
+            self.st0 = false;
+            return false;
+        }
+        self.outstack.push(val);
+        true
+    }
 
     pub(crate) fn jmp(&mut self) -> Result<(), ()> {
         self.cy0
@@ -870,6 +903,13 @@ impl Debug for CoreRegs {
                 write!(f, "{}s16{}[{}{:02}{}]={}{}{}\n\t", reg, eq, reset, i, eq, val, v, reset)?;
             }
         }
+
+        if !self.outstack.is_empty() {
+            write!(f, "\n{}OUTSTACK:{}\t", sect, reset)?;
+            for (i, v) in self.outstack.iter().enumerate() {
+                write!(f, "{}[{}{}{}]={}{:?}{}\n\t", reg, reset, i, eq, val, v, reset)?;
+            }
+        }
         Ok(())
     }
 }
@@ -908,5 +948,89 @@ mod test {
         }
 
         eprintln!("{regs:#?}");
+    }
+
+    #[test]
+    fn outstack_default_is_empty() {
+        let regs = CoreRegs::new();
+        assert!(regs.outstack().is_empty());
+    }
+
+    #[test]
+    fn outstack_push_and_read() {
+        let mut regs = CoreRegs::new();
+        assert!(regs.push_outstack(OutrValue::Int(1)));
+        assert!(regs.push_outstack(OutrValue::Int(2)));
+        assert!(regs.push_outstack(OutrValue::Bytes(b"abc".to_vec())));
+
+        assert_eq!(regs.outstack().len(), 3);
+        assert_eq!(regs.outstack()[0], OutrValue::Int(1));
+        assert_eq!(regs.outstack()[1], OutrValue::Int(2));
+        assert_eq!(regs.outstack()[2], OutrValue::Bytes(b"abc".to_vec()));
+    }
+
+    #[test]
+    fn outstack_limit_zero_rejects_all() {
+        let mut regs = CoreRegs::new();
+        regs.set_outstack_limit(0);
+        assert!(!regs.push_outstack(OutrValue::Int(99)));
+        assert!(regs.outstack().is_empty());
+        assert!(!regs.st0);
+    }
+
+    #[test]
+    fn outstack_limit_enforced_exactly() {
+        let mut regs = CoreRegs::new();
+        regs.set_outstack_limit(2);
+        assert!(regs.push_outstack(OutrValue::Int(10)));
+        assert!(regs.st0);
+        assert!(regs.push_outstack(OutrValue::Int(20)));
+        assert!(regs.st0);
+        assert!(!regs.push_outstack(OutrValue::Int(30)));
+        assert!(!regs.st0);
+        assert_eq!(regs.outstack().len(), 2);
+    }
+
+    #[test]
+    fn outstack_drain_returns_contents_and_clears() {
+        let mut regs = CoreRegs::new();
+        regs.push_outstack(OutrValue::Int(7));
+        regs.push_outstack(OutrValue::Bytes(vec![0xFF]));
+
+        let drained = regs.drain_outstack();
+        assert_eq!(drained.len(), 2);
+        assert_eq!(drained[0], OutrValue::Int(7));
+        assert_eq!(drained[1], OutrValue::Bytes(vec![0xFF]));
+        assert!(regs.outstack().is_empty());
+    }
+
+    #[test]
+    fn outstack_drain_allows_reuse() {
+        let mut regs = CoreRegs::new();
+        regs.set_outstack_limit(2);
+        regs.push_outstack(OutrValue::Int(1));
+        regs.push_outstack(OutrValue::Int(2));
+        assert!(!regs.push_outstack(OutrValue::Int(3)));
+
+        let _ = regs.drain_outstack();
+        regs.st0 = true;
+        assert!(regs.push_outstack(OutrValue::Int(4)));
+        assert_eq!(regs.outstack().len(), 1);
+        assert_eq!(regs.outstack()[0], OutrValue::Int(4));
+    }
+
+    #[test]
+    fn outstack_debug_empty_omitted() {
+        let regs = CoreRegs::new();
+        let dbg = format!("{regs:?}");
+        assert!(!dbg.contains("OUTSTACK"));
+    }
+
+    #[test]
+    fn outstack_debug_shown_when_nonempty() {
+        let mut regs = CoreRegs::new();
+        regs.push_outstack(OutrValue::Int(42));
+        let dbg = format!("{regs:?}");
+        assert!(dbg.contains("OUTSTACK"));
     }
 }

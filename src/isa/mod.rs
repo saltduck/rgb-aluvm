@@ -32,7 +32,6 @@ mod exec;
 mod flags;
 mod instr;
 pub mod opcodes;
-mod outr;
 
 pub use bytecode::{Bytecode, BytecodeError};
 pub use exec::{ExecStep, InstructionSet};
@@ -42,10 +41,9 @@ pub use flags::{
 };
 pub use instr::{
     ArithmeticOp, BitwiseOp, BytesOp, CmpOp, ControlFlowOp, Curve25519Op, DigestOp, Instr, MoveOp,
-    PutOp, ReservedOp, Secp256k1Op,
+    OutrValue, OutstackOp, PutOp, ReservedOp, Secp256k1Op,
 };
 pub use opcodes::{INSTR_OUTR, INSTR_OUTSTACK_FROM, INSTR_OUTSTACK_TO};
-pub use outr::{OutrContext, OutrValue, RgbExt};
 
 /// List of standardised ISA extensions.
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug, Display)]

@@ -37,9 +37,9 @@ use sha2::Digest;
 
 use super::{
     ArithmeticOp, BitwiseOp, Bytecode, BytesOp, CmpOp, ControlFlowOp, Curve25519Op, DigestOp,
-    Instr, MoveOp, PutOp, ReservedOp, Secp256k1Op,
+    Instr, MoveOp, OutstackOp, PutOp, ReservedOp, Secp256k1Op,
 };
-use super::outr::{OutrContext, OutrValue, RgbExt};
+use super::OutrValue;
 use crate::data::{ByteStr, MaybeNumber, Number, NumberLayout};
 use crate::isa::{ExtendFlag, FloatEqFlag, IntFlags, MergeFlag, NoneEqFlag, SignFlag};
 use crate::library::{constants, IsaName, IsaSeg, LibSite};
@@ -132,6 +132,7 @@ where Extension: InstructionSet
         set.extend(DigestOp::isa_ids()).expect("hardcoded");
         set.extend(Secp256k1Op::isa_ids()).expect("hardcoded");
         set.extend(Curve25519Op::isa_ids()).expect("hardcoded");
+        set.extend(OutstackOp::isa_ids()).expect("hardcoded");
         set.extend(Extension::isa_ids()).expect("hardcoded");
         set
     }
@@ -150,6 +151,7 @@ where Extension: InstructionSet
             Instr::Secp256k1(instr) => instr.src_regs(),
             #[cfg(feature = "curve25519")]
             Instr::Curve25519(instr) => instr.src_regs(),
+            Instr::Outstack(instr) => instr.src_regs(),
             Instr::ExtensionCodes(instr) => instr.src_regs(),
             Instr::ReservedInstruction(instr) => instr.src_regs(),
             Instr::Nop => BTreeSet::new(),
@@ -170,6 +172,7 @@ where Extension: InstructionSet
             Instr::Secp256k1(instr) => instr.dst_regs(),
             #[cfg(feature = "curve25519")]
             Instr::Curve25519(instr) => instr.dst_regs(),
+            Instr::Outstack(instr) => instr.dst_regs(),
             Instr::ExtensionCodes(instr) => instr.dst_regs(),
             Instr::ReservedInstruction(instr) => instr.dst_regs(),
             Instr::Nop => BTreeSet::new(),
@@ -190,6 +193,7 @@ where Extension: InstructionSet
             Instr::Secp256k1(instr) => instr.complexity(),
             #[cfg(feature = "curve25519")]
             Instr::Curve25519(instr) => instr.complexity(),
+            Instr::Outstack(instr) => instr.complexity(),
             Instr::ExtensionCodes(instr) => instr.complexity(),
             Instr::ReservedInstruction(instr) => instr.complexity(),
             Instr::Nop => 1,
@@ -211,6 +215,7 @@ where Extension: InstructionSet
             Instr::Secp256k1(instr) => instr.exec(regs, site, &()),
             #[cfg(feature = "curve25519")]
             Instr::Curve25519(instr) => instr.exec(regs, site, &()),
+            Instr::Outstack(instr) => instr.exec(regs, site, &()),
             Instr::ExtensionCodes(instr) => instr.exec(regs, site, ctx),
             Instr::ReservedInstruction(_) => ControlFlowOp::Fail.exec(regs, site, &()),
             Instr::Nop => ExecStep::Next,
@@ -1679,17 +1684,17 @@ impl InstructionSet for ReservedOp {
     }
 }
 
-impl InstructionSet for RgbExt {
-    type Context<'ctx> = OutrContext<'ctx>;
+impl InstructionSet for OutstackOp {
+    type Context<'ctx> = ();
 
     #[inline]
     fn isa_ids() -> IsaSeg { IsaSeg::with(constants::ISA_ID_OUTSTACK) }
 
     fn src_regs(&self) -> BTreeSet<Reg> {
         match self {
-            RgbExt::Outr(r) if *r < 32 => bset![Reg::A(RegA::A64, Reg32::from(u5::with(*r)))],
-            RgbExt::Outr(r) if *r < 48 => bset![Reg::S(RegS::from(*r - 32))],
-            RgbExt::Outr(_) => BTreeSet::new(),
+            OutstackOp::Outr(r) if *r < 32 => bset![Reg::A(RegA::A64, Reg32::from(u5::with(*r)))],
+            OutstackOp::Outr(r) if *r < 48 => bset![Reg::S(RegS::from(*r - 32))],
+            OutstackOp::Outr(_) => BTreeSet::new(),
         }
     }
 
@@ -1698,11 +1703,8 @@ impl InstructionSet for RgbExt {
     #[inline]
     fn complexity(&self) -> u64 { 2 }
 
-    fn exec(&self, regs: &mut CoreRegs, _site: LibSite, ctx: &Self::Context<'_>) -> ExecStep {
-        let RgbExt::Outr(reg) = self;
-        if ctx.output.borrow().len() >= ctx.max_items {
-            return ExecStep::Fail;
-        }
+    fn exec(&self, regs: &mut CoreRegs, _site: LibSite, _: &()) -> ExecStep {
+        let OutstackOp::Outr(reg) = self;
         if *reg < 32 {
             let r = Reg32::from(u5::with(*reg));
             let n = regs.get_n(RegA::A64, r);
@@ -1713,7 +1715,9 @@ impl InstructionSet for RgbExt {
                     OutrValue::Int(u as i64)
                 })
                 .unwrap_or(OutrValue::Int(0));
-            ctx.output.borrow_mut().push(v);
+            if !regs.push_outstack(v) {
+                return ExecStep::Fail;
+            }
             ExecStep::Next
         } else if *reg < 48 {
             let s_idx = *reg - 32;
@@ -1721,7 +1725,9 @@ impl InstructionSet for RgbExt {
                 .s16(RegS::from(s_idx))
                 .map(|s| OutrValue::Bytes(s.as_ref().to_vec()))
                 .unwrap_or_else(|| OutrValue::Bytes(Vec::new()));
-            ctx.output.borrow_mut().push(s_val);
+            if !regs.push_outstack(s_val) {
+                return ExecStep::Fail;
+            }
             ExecStep::Next
         } else {
             ExecStep::Fail
@@ -1994,7 +2000,7 @@ mod tests {
     }
 
     #[test]
-    fn outr_rgb_ext_uses_outstack_opcode_not_ripemd() {
+    fn outr_outstack_uses_outstack_opcode_not_ripemd() {
         use crate::isa::opcodes::{INSTR_OUTR, INSTR_RIPEMD};
         use crate::library::{Cursor, LibSeg};
         use crate::reg::Reg16;
@@ -2002,10 +2008,9 @@ mod tests {
         let lib_seg = LibSeg::default();
         let outr_bytes = [INSTR_OUTR, 0u8];
         let mut c = Cursor::with(&outr_bytes[..], &[][..], &lib_seg);
-        let i: Instr<RgbExt> = Instr::decode(&mut c).unwrap();
-        assert!(matches!(i, Instr::ExtensionCodes(RgbExt::Outr(0))));
+        let i: Instr<ReservedOp> = Instr::decode(&mut c).unwrap();
+        assert!(matches!(i, Instr::Outstack(OutstackOp::Outr(0))));
 
-        // RIPEMD remains at `0x80` for the default ISA (no Outstack extension).
         let ripemd_bytes = [INSTR_RIPEMD, 0u8];
         let mut c2 = Cursor::with(&ripemd_bytes[..], &[][..], &lib_seg);
         let i2: Instr<ReservedOp> = Instr::decode(&mut c2).unwrap();
@@ -2026,7 +2031,7 @@ mod tests {
         let lib_seg = LibSeg::default();
         let reserved = [INSTR_OUTSTACK_FROM + 1];
         let mut c = Cursor::with(&reserved[..], &[][..], &lib_seg);
-        let err = Instr::<RgbExt>::decode(&mut c).unwrap_err();
+        let err = Instr::<ReservedOp>::decode(&mut c).unwrap_err();
         assert_eq!(err, CodeEofError);
     }
 
@@ -2038,19 +2043,17 @@ mod tests {
         let lib_seg = LibSeg::default();
         let mut code = [0u8; 8];
         let mut w = Cursor::<_, ByteStr>::new(&mut code[..], &lib_seg);
-        Instr::<RgbExt>::ExtensionCodes(RgbExt::Outr(7))
+        Instr::<ReservedOp>::Outstack(OutstackOp::Outr(7))
             .encode(&mut w)
             .unwrap();
         let len = w.offset().0 as usize;
         let mut r = Cursor::with(&code[..len], &[][..], &lib_seg);
-        let i = Instr::<RgbExt>::decode(&mut r).unwrap();
-        assert_eq!(i, Instr::ExtensionCodes(RgbExt::Outr(7)));
+        let i = Instr::<ReservedOp>::decode(&mut r).unwrap();
+        assert_eq!(i, Instr::Outstack(OutstackOp::Outr(7)));
     }
 
     #[test]
     fn outr_exec_a64_s16_fail_and_cap() {
-        use core::cell::RefCell;
-
         let lib_site = LibSite::default();
         let mut register = CoreRegs::default();
         PutOp::PutA(
@@ -2059,38 +2062,28 @@ mod tests {
             MaybeNumber::from(42u64).into(),
         )
         .exec(&mut register, lib_site, &());
-        let out = RefCell::new(Vec::new());
-        let ctx = OutrContext {
-            output: &out,
-            max_items: 8,
-        };
-        assert_eq!(
-            RgbExt::Outr(0).exec(&mut register, lib_site, &ctx),
-            ExecStep::Next
-        );
-        assert_eq!(out.borrow().len(), 1);
-        assert_eq!(out.borrow()[0], OutrValue::Int(42));
 
         assert_eq!(
-            RgbExt::Outr(48).exec(&mut register, lib_site, &ctx),
+            OutstackOp::Outr(0).exec(&mut register, lib_site, &()),
+            ExecStep::Next
+        );
+        assert_eq!(register.outstack().len(), 1);
+        assert_eq!(register.outstack()[0], OutrValue::Int(42));
+
+        assert_eq!(
+            OutstackOp::Outr(48).exec(&mut register, lib_site, &()),
             ExecStep::Fail
         );
 
-        let out2 = RefCell::new(Vec::new());
-        let ctx2 = OutrContext {
-            output: &out2,
-            max_items: 0,
-        };
+        register.set_outstack_limit(1);
         assert_eq!(
-            RgbExt::Outr(0).exec(&mut register, lib_site, &ctx2),
+            OutstackOp::Outr(0).exec(&mut register, lib_site, &()),
             ExecStep::Fail
         );
     }
 
     #[test]
     fn outr_exec_s16_bytes() {
-        use core::cell::RefCell;
-
         let lib_site = LibSite::default();
         let mut register = CoreRegs::default();
         let s = b"hello";
@@ -2099,17 +2092,135 @@ mod tests {
             lib_site,
             &(),
         );
-        let out = RefCell::new(Vec::new());
-        let ctx = OutrContext {
-            output: &out,
-            max_items: 8,
-        };
+
         assert_eq!(
-            RgbExt::Outr(32).exec(&mut register, lib_site, &ctx),
+            OutstackOp::Outr(32).exec(&mut register, lib_site, &()),
             ExecStep::Next
         );
-        assert_eq!(out.borrow().len(), 1);
-        assert_eq!(out.borrow()[0], OutrValue::Bytes(s.to_vec()));
+        assert_eq!(register.outstack().len(), 1);
+        assert_eq!(register.outstack()[0], OutrValue::Bytes(s.to_vec()));
+    }
+
+    #[test]
+    fn outr_via_instr_exec_writes_to_outstack() {
+        let site = LibSite::default();
+        let mut regs = CoreRegs::default();
+        PutOp::PutA(RegA::A64, Reg32::Reg1, MaybeNumber::from(100u64).into())
+            .exec(&mut regs, site, &());
+
+        let instr: Instr<ReservedOp> = Instr::Outstack(OutstackOp::Outr(1));
+        assert_eq!(instr.exec(&mut regs, site, &()), ExecStep::Next);
+        assert_eq!(regs.outstack().len(), 1);
+        assert_eq!(regs.outstack()[0], OutrValue::Int(100));
+    }
+
+    #[test]
+    fn outr_via_instr_exec_limit_respected() {
+        let site = LibSite::default();
+        let mut regs = CoreRegs::default();
+        regs.set_outstack_limit(1);
+        PutOp::PutA(RegA::A64, Reg32::Reg0, MaybeNumber::from(1u64).into())
+            .exec(&mut regs, site, &());
+
+        let instr: Instr<ReservedOp> = Instr::Outstack(OutstackOp::Outr(0));
+        assert_eq!(instr.exec(&mut regs, site, &()), ExecStep::Next);
+        assert_eq!(regs.outstack().len(), 1);
+        assert_eq!(instr.exec(&mut regs, site, &()), ExecStep::Fail);
+        assert_eq!(regs.outstack().len(), 1);
+    }
+
+    #[test]
+    fn outr_none_register_outputs_zero() {
+        let site = LibSite::default();
+        let mut regs = CoreRegs::default();
+        assert_eq!(
+            OutstackOp::Outr(5).exec(&mut regs, site, &()),
+            ExecStep::Next
+        );
+        assert_eq!(regs.outstack()[0], OutrValue::Int(0));
+    }
+
+    #[test]
+    fn outr_none_s16_outputs_empty_bytes() {
+        let site = LibSite::default();
+        let mut regs = CoreRegs::default();
+        assert_eq!(
+            OutstackOp::Outr(32).exec(&mut regs, site, &()),
+            ExecStep::Next
+        );
+        assert_eq!(regs.outstack()[0], OutrValue::Bytes(Vec::new()));
+    }
+
+    #[test]
+    fn outr_multiple_pushes_preserve_order() {
+        let site = LibSite::default();
+        let mut regs = CoreRegs::default();
+        PutOp::PutA(RegA::A64, Reg32::Reg0, MaybeNumber::from(10u64).into())
+            .exec(&mut regs, site, &());
+        PutOp::PutA(RegA::A64, Reg32::Reg1, MaybeNumber::from(20u64).into())
+            .exec(&mut regs, site, &());
+        BytesOp::Put(0.into(), Box::new(ByteStr::with(b"xyz")), false)
+            .exec(&mut regs, site, &());
+
+        OutstackOp::Outr(0).exec(&mut regs, site, &());
+        OutstackOp::Outr(1).exec(&mut regs, site, &());
+        OutstackOp::Outr(32).exec(&mut regs, site, &());
+
+        let out = regs.outstack();
+        assert_eq!(out.len(), 3);
+        assert_eq!(out[0], OutrValue::Int(10));
+        assert_eq!(out[1], OutrValue::Int(20));
+        assert_eq!(out[2], OutrValue::Bytes(b"xyz".to_vec()));
+    }
+
+    #[test]
+    fn outr_all_a64_boundary_registers() {
+        let site = LibSite::default();
+        let mut regs = CoreRegs::default();
+        PutOp::PutA(RegA::A64, Reg32::Reg0, MaybeNumber::from(0u64).into())
+            .exec(&mut regs, site, &());
+        PutOp::PutA(RegA::A64, Reg32::from(u5::with(31)), MaybeNumber::from(31u64).into())
+            .exec(&mut regs, site, &());
+
+        assert_eq!(OutstackOp::Outr(0).exec(&mut regs, site, &()), ExecStep::Next);
+        assert_eq!(OutstackOp::Outr(31).exec(&mut regs, site, &()), ExecStep::Next);
+        assert_eq!(regs.outstack()[0], OutrValue::Int(0));
+        assert_eq!(regs.outstack()[1], OutrValue::Int(31));
+    }
+
+    #[test]
+    fn outr_s16_boundary_registers() {
+        let site = LibSite::default();
+        let mut regs = CoreRegs::default();
+        BytesOp::Put(0.into(), Box::new(ByteStr::with(b"first")), false)
+            .exec(&mut regs, site, &());
+        BytesOp::Put(15.into(), Box::new(ByteStr::with(b"last")), false)
+            .exec(&mut regs, site, &());
+
+        assert_eq!(OutstackOp::Outr(32).exec(&mut regs, site, &()), ExecStep::Next);
+        assert_eq!(OutstackOp::Outr(47).exec(&mut regs, site, &()), ExecStep::Next);
+        assert_eq!(regs.outstack()[0], OutrValue::Bytes(b"first".to_vec()));
+        assert_eq!(regs.outstack()[1], OutrValue::Bytes(b"last".to_vec()));
+    }
+
+    #[test]
+    fn outr_drain_then_continue() {
+        let site = LibSite::default();
+        let mut regs = CoreRegs::default();
+        regs.set_outstack_limit(2);
+        PutOp::PutA(RegA::A64, Reg32::Reg0, MaybeNumber::from(1u64).into())
+            .exec(&mut regs, site, &());
+
+        OutstackOp::Outr(0).exec(&mut regs, site, &());
+        OutstackOp::Outr(0).exec(&mut regs, site, &());
+        assert_eq!(OutstackOp::Outr(0).exec(&mut regs, site, &()), ExecStep::Fail);
+
+        let batch1 = regs.drain_outstack();
+        assert_eq!(batch1.len(), 2);
+
+        regs.st0 = true;
+        assert_eq!(OutstackOp::Outr(0).exec(&mut regs, site, &()), ExecStep::Next);
+        assert_eq!(regs.outstack().len(), 1);
     }
 
     /* TODO: Enable after curve25519 re-implementation

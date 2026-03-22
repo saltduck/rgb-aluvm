@@ -134,15 +134,14 @@
 //! - Call stack register (cs0), 3*2^16 bits (192kB block)
 //! - Call stack pointer register (cp0), 16 bits
 //!
-//! ### OUTR (OUTSTACK extension)
+//! ### OUTR (OUTSTACK)
 //!
-//! - Opcodes `0x90`..=`0x9F` are reserved for the Outstack ISA extension; [`INSTR_OUTR`](crate::isa::INSTR_OUTR)
+//! - Opcodes `0x90`..=`0x9F` are reserved for the Outstack ISA; [`INSTR_OUTR`](crate::isa::INSTR_OUTR)
 //!   is `0x90` followed by a register index byte.
-//! - Use [`Instr<RgbExt>`](isa::Instr) with [`RgbExt`](isa::RgbExt) and an [`OutrContext`](isa::OutrContext)
-//!   when executing programs that append register values to a host-visible output list.
-//! - With [`Instr<ReservedOp>`](isa::Instr) (the default), extension opcodes in `0x80`..=`0xFE`
-//!   decode as [`ReservedOp`](isa::ReservedOp); use [`Instr<RgbExt>`](isa::Instr) when the program
-//!   commits to the Outstack extension.
+//! - [`OutstackOp`](isa::OutstackOp) is a standard [`Instr`](isa::Instr) variant (`Instr::Outstack`).
+//!   OUTR writes register values directly into [`CoreRegs`](reg::CoreRegs)'s outstack; after
+//!   execution the host retrieves results via [`CoreRegs::outstack`](reg::CoreRegs::outstack) or
+//!   [`CoreRegs::drain_outstack`](reg::CoreRegs::drain_outstack).
 //!
 //! [AluVM]: https://github.com/internet2-org/aluvm-spec
 

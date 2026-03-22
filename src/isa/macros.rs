@@ -970,6 +970,21 @@ macro_rules! instr {
             Instr::Secp256k1(Secp256k1Op::Neg($crate::_reg_idx!($idx1), $crate::_reg_idx8!($idx2)))
         }
     };
+    (outr a64[$idx:literal]) => {{
+        const I: u8 = $idx;
+        const _: () = assert!(I < 32, "OUTR a64 index must be in 0..32");
+        Instr::Outstack(::aluvm::isa::OutstackOp::Outr(I))
+    }};
+    (outr s16[$idx:literal]) => {{
+        const I: u8 = $idx;
+        const _: () = assert!(I < 16, "OUTR s16 index must be in 0..16");
+        Instr::Outstack(::aluvm::isa::OutstackOp::Outr(32 + I))
+    }};
+    (outr $byte:literal) => {{
+        const B: u8 = $byte;
+        const _: () = assert!(B < 48, "OUTR raw register byte must be in 0..48");
+        Instr::Outstack(::aluvm::isa::OutstackOp::Outr(B))
+    }};
     { $($tt:tt)+ } => {
         Instr::ExtensionCodes(isa_instr! { $( $tt )+ })
     };
@@ -1518,4 +1533,31 @@ macro_rules! _int_flags {
     ($other:ident) => {
         panic!("wrong integer operation flags")
     };
+}
+
+/// Like [`aluasm!`](crate::aluasm) but produces `Vec<Instr<ReservedOp>>` with `outr` support.
+#[macro_export]
+macro_rules! aluasm_rgb {
+    ($( $tt:tt )+) => {{ #[allow(unused_imports)] {
+        use ::std::boxed::Box;
+
+        use ::aluvm::isa::{
+            ArithmeticOp, BitwiseOp, BytesOp, CmpOp, ControlFlowOp, DigestOp, ExtendFlag,
+            FloatEqFlag, Instr, IntFlags, MergeFlag, MoveOp, OutstackOp, PutOp, ReservedOp,
+            RoundingFlag, Secp256k1Op, SignFlag, NoneEqFlag,
+        };
+        use ::aluvm::reg::{
+            Reg16, Reg32, Reg8, RegA, RegA2, RegAR, RegBlockAFR, RegBlockAR, RegF, RegR, RegS,
+            NumericRegister,
+        };
+        use ::aluvm::library::LibSite;
+        use ::aluvm::data::{ByteStr, Number, MaybeNumber, Step};
+
+        let mut code: Vec<Instr<ReservedOp>> = vec![];
+        #[allow(unreachable_code)]
+        {
+            $crate::aluasm_inner! { code => $( $tt )+ }
+        }
+        code
+    } }};
 }

@@ -34,7 +34,7 @@ use amplify::num::{u1, u2, u3, u5};
 use super::opcodes::*;
 use super::{
     ArithmeticOp, BitwiseOp, BytesOp, CmpOp, ControlFlowOp, Curve25519Op, DigestOp, Instr,
-    InstructionSet, MoveOp, PutOp, ReservedOp, Secp256k1Op,
+    InstructionSet, MoveOp, OutstackOp, PutOp, ReservedOp, Secp256k1Op,
 };
 use crate::data::{ByteStr, MaybeNumber};
 use crate::library::{CodeEofError, LibSite, Read, Write, WriteError};
@@ -129,6 +129,7 @@ where Extension: InstructionSet
             Instr::Secp256k1(instr) => instr.instr_byte(),
             #[cfg(feature = "curve25519")]
             Instr::Curve25519(instr) => instr.instr_byte(),
+            Instr::Outstack(instr) => instr.instr_byte(),
             Instr::ExtensionCodes(instr) => instr.instr_byte(),
             Instr::ReservedInstruction(instr) => instr.instr_byte(),
             Instr::Nop => 1,
@@ -149,6 +150,7 @@ where Extension: InstructionSet
             Instr::Secp256k1(instr) => instr.call_site(),
             #[cfg(feature = "curve25519")]
             Instr::Curve25519(instr) => instr.call_site(),
+            Instr::Outstack(instr) => instr.call_site(),
             Instr::ExtensionCodes(instr) => instr.call_site(),
             Instr::ReservedInstruction(instr) => instr.call_site(),
             Instr::Nop => None,
@@ -170,6 +172,7 @@ where Extension: InstructionSet
             Instr::Secp256k1(instr) => instr.encode_args(writer),
             #[cfg(feature = "curve25519")]
             Instr::Curve25519(instr) => instr.encode_args(writer),
+            Instr::Outstack(instr) => instr.encode_args(writer),
             Instr::ExtensionCodes(instr) => instr.encode_args(writer),
             Instr::ReservedInstruction(instr) => instr.encode_args(writer),
             Instr::Nop => Ok(()),
@@ -208,6 +211,9 @@ where Extension: InstructionSet
             #[cfg(feature = "curve25519")]
             instr if Curve25519Op::instr_range().contains(&instr) => {
                 Instr::Curve25519(Curve25519Op::decode(reader)?)
+            }
+            instr if OutstackOp::instr_range().contains(&instr) => {
+                Instr::Outstack(OutstackOp::decode(reader)?)
             }
             INSTR_RESV_FROM..=INSTR_RESV_TO => {
                 Instr::ReservedInstruction(ReservedOp::decode(reader)?)
@@ -1308,6 +1314,30 @@ impl Bytecode for Curve25519Op {
             INSTR_ED_NEG => Self::Neg(reader.read_u5()?.into(), reader.read_u3()?.into()),
             x => unreachable!("instruction {:#010b} classified as Curve25519 operation", x),
         })
+    }
+}
+
+impl Bytecode for OutstackOp {
+    #[inline]
+    fn instr_range() -> RangeInclusive<u8> { INSTR_OUTSTACK_FROM..=INSTR_OUTSTACK_TO }
+
+    fn instr_byte(&self) -> u8 { INSTR_OUTR }
+
+    fn encode_args<W>(&self, writer: &mut W) -> Result<(), BytecodeError>
+    where W: Write {
+        let OutstackOp::Outr(reg) = self;
+        writer.write_u8(*reg)?;
+        Ok(())
+    }
+
+    fn decode<R>(reader: &mut R) -> Result<Self, CodeEofError>
+    where R: Read {
+        let opcode = reader.read_u8()?;
+        match opcode {
+            INSTR_OUTR => Ok(OutstackOp::Outr(reader.read_u8()?)),
+            x if (INSTR_OUTSTACK_FROM..=INSTR_OUTSTACK_TO).contains(&x) => Err(CodeEofError),
+            x => unreachable!("instruction {:#010b} classified as Outstack operation", x),
+        }
     }
 }
 

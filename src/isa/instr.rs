@@ -25,6 +25,9 @@
 
 #[cfg(all(feature = "alloc", not(feature = "std")))]
 use alloc::boxed::Box;
+use alloc::vec::Vec;
+
+
 
 use super::{
     DeleteFlag, FloatEqFlag, InsertFlag, InstructionSet, IntFlags, MergeFlag, RoundingFlag,
@@ -34,6 +37,24 @@ use crate::data::{ByteStr, MaybeNumber, Step};
 use crate::isa::{ExtendFlag, NoneEqFlag};
 use crate::library::LibSite;
 use crate::reg::{Reg16, Reg32, Reg8, RegA, RegA2, RegAF, RegAR, RegBlockAR, RegF, RegR, RegS};
+
+/// One value produced by [`OutstackOp::Outr`].
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub enum OutrValue {
+    /// Integer from `a64[reg]` (0..32).
+    Int(i64),
+    /// Bytes from `s16[reg - 32]` (32..48).
+    Bytes(Vec<u8>),
+}
+
+/// Outstack extension instructions (opcode range `0x90`..=`0x9F`).
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Display)]
+#[display(inner)]
+pub enum OutstackOp {
+    /// `OUTR(reg)`: reg 0..32 outputs `a64[reg]`; reg 32..48 outputs `s16[reg - 32]`.
+    #[display("outr    {0}")]
+    Outr(u8),
+}
 
 /// Reserved instruction, which equal to [`ControlFlowOp::Fail`].
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Display, Default)]
@@ -88,6 +109,10 @@ where Extension: InstructionSet
     /// Operations on Curve25519 elliptic curve. See [`Curve25519Op`] for the details.
     // 0b01_001_1**
     Curve25519(Curve25519Op),
+
+    /// Outstack instructions. See [`OutstackOp`] for the details.
+    // 0x90..=0x9F
+    Outstack(OutstackOp),
 
     /// Extension operations which can be provided by a host environment provided via generic
     /// parameter
